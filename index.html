@@ -978,7 +978,7 @@ html { scroll-behavior: smooth; }
 </head>
 <body class="p-4">
     <!-- Auth Container -->
-    <div id="authContainer" class="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 modal-overlay hidden">
+    <div id="authContainer" class="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 modal-overlay">
         <div class="auth-form">
             <h2>⚔️ HAVEN v1</h2>
             <div id="loginForm">
@@ -1021,7 +1021,7 @@ html { scroll-behavior: smooth; }
     </div>
 
     <!-- Saved characters and character creation -->
-    <div id="charSelectContainer" class="modal-overlay">
+    <div id="charSelectContainer" class="modal-overlay hidden">
         <section class="auth-form character-menu" aria-labelledby="characterMenuTitle">
             <header class="character-menu-header">
                 <h2 id="characterMenuTitle">⚔️ Your Heroes</h2>
@@ -1519,7 +1519,7 @@ html { scroll-behavior: smooth; }
                             </div>
                         </section>
                         <button class="btn-danger w-full mt-6" id="deleteCharBtn" onclick="deleteCharacter()">Delete Character</button>
-                        <button class="btn-danger w-full" id="logoutAccBtn" onclick="logout()">Logout</button>
+                        <button class="btn-danger w-full" id="logoutAccBtn">Logout</button>
                     </div>
                 </div>
             </div>
@@ -1667,37 +1667,105 @@ html { scroll-behavior: smooth; }
     </div>
 
     <script>
-        // Game State
-        function loadUsers() {
-            try {
-                const savedUsers = JSON.parse(localStorage.getItem('users') || '{}');
-                if (!savedUsers || typeof savedUsers !== 'object' || Array.isArray(savedUsers)) return {};
-                return Object.fromEntries(Object.entries(savedUsers).filter(([, user]) => user && typeof user === 'object' && !Array.isArray(user)));
-            } catch (error) {
-                return {};
-            }
-        }
-
         const gameState = {
             currentUser: null,
             currentCharacter: null,
             characters: {},
-            users: loadUsers(),
         };
+        let csrfToken = '';
+        let saveVersion = 0;
+        let pendingSave = null;
+        let saveTask = null;
+        let saveConflict = false;
+        let authBusy = false;
+
+        async function apiRequest(action, data = {}) {
+            const response = await fetch('api.php', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+                body: JSON.stringify({ action, ...data })
+            });
+            const result = await response.json();
+            if (!response.ok) {
+                const error = new Error(result.error || 'Request failed.');
+                error.status = response.status;
+                throw error;
+            }
+            return result;
+        }
+
+        async function initializeSession() {
+            try {
+                const response = await fetch('api.php', { credentials: 'same-origin', cache: 'no-store' });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.error || 'Database unavailable.');
+                csrfToken = result.csrf;
+                if (result.user) enterAccount(result);
+            } catch (error) {
+                showError(document.getElementById('loginError'), 'Unable to connect to the database. Reload to try again.');
+            }
+        }
+
+        function enterAccount(result) {
+            gameState.currentUser = result.user;
+            gameState.characters = result.characters && typeof result.characters === 'object' && !Array.isArray(result.characters) ? result.characters : {};
+            saveVersion = result.version;
+            pendingSave = null;
+            saveConflict = false;
+            showCharacterSelection();
+            try {
+                const oldUsers = JSON.parse(localStorage.getItem('users') || '{}');
+                const oldCharacters = oldUsers?.localPlayer?.characters;
+                if (Object.keys(gameState.characters).length === 0 && oldCharacters && typeof oldCharacters === 'object' && !Array.isArray(oldCharacters) && Object.keys(oldCharacters).length &&
+                    confirm('Import your existing local-player characters into this empty account? Your local saves will remain on this device.')) {
+                    gameState.characters = oldCharacters;
+                    saveCharacters();
+                    refreshCharacterList();
+                }
+            } catch (error) {
+                // An unreadable local save does not prevent database login.
+            }
+        }
+
+        function flushSaves() {
+            if (saveTask) return saveTask;
+            if (!pendingSave || saveConflict) return Promise.resolve(!pendingSave);
+            saveTask = (async () => {
+                while (pendingSave && !saveConflict) {
+                    const snapshot = pendingSave;
+                    try {
+                        const result = await apiRequest('save', { characters: JSON.parse(snapshot), version: saveVersion });
+                        saveVersion = result.version;
+                        if (pendingSave === snapshot) pendingSave = null;
+                    } catch (error) {
+                        if (error.status === 409) saveConflict = true;
+                        showNotification(error.status === 409 ? error.message : 'Save failed. Progress is unsaved; try again before leaving.');
+                        return false;
+                    }
+                }
+                return !pendingSave;
+            })().finally(() => { saveTask = null; });
+            return saveTask;
+        }
+
+        window.addEventListener('beforeunload', (event) => {
+            if (pendingSave || saveTask) {
+                event.preventDefault();
+                event.returnValue = '';
+            }
+        });
+        setInterval(() => { if (pendingSave && !saveConflict) flushSaves(); }, 10000);
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             setupEventListeners();
             renderMarketItems();
-            gameState.currentUser = 'localPlayer';
-            gameState.users[gameState.currentUser] = gameState.users[gameState.currentUser] || { characters: {} };
-            const savedCharacters = gameState.users[gameState.currentUser].characters;
-            gameState.characters = savedCharacters && typeof savedCharacters === 'object' && !Array.isArray(savedCharacters) ? savedCharacters : {};
-            showCharacterSelection();
+            initializeSession();
             updateTime();
             setInterval(updateTime, 1000);
             setInterval(updateRestCooldown, 1000);
-        setInterval(updateRegenCountdowns, 1000);
+            setInterval(updateRegenCountdowns, 1000);
         });
 
         function setupEventListeners() {
@@ -1727,54 +1795,48 @@ html { scroll-behavior: smooth; }
             document.getElementById('registerError').classList.add('hidden');
         }
 
-        function login() {
+        async function login() {
+            if (authBusy) return;
             const username = document.getElementById('loginUsername').value;
             const password = document.getElementById('loginPassword').value;
             const errorDiv = document.getElementById('loginError');
-
-            if (!username || !password) {
-                showError(errorDiv, 'Please fill in all fields');
-                return;
+            if (!username || !password) return showError(errorDiv, 'Please fill in all fields');
+            if (!csrfToken) return showError(errorDiv, 'Database connection unavailable. Reload to try again.');
+            authBusy = true;
+            try {
+                const result = await apiRequest('login', { username, password });
+                document.getElementById('loginPassword').value = '';
+                enterAccount(result);
+            } catch (error) {
+                showError(errorDiv, error.message || 'Login failed.');
+            } finally {
+                authBusy = false;
             }
-
-            if (!gameState.users[username] || gameState.users[username].password !== password) {
-                showError(errorDiv, 'Invalid username or password');
-                return;
-            }
-
-            gameState.currentUser = username;
-            const savedCharacters = gameState.users[username].characters;
-            gameState.characters = savedCharacters && typeof savedCharacters === 'object' && !Array.isArray(savedCharacters) ? savedCharacters : {};
-            showCharacterSelection();
         }
 
-        function register() {
+        async function register() {
+            if (authBusy) return;
             const username = document.getElementById('registerUsername').value;
             const password = document.getElementById('registerPassword').value;
-            const confirm = document.getElementById('registerConfirm').value;
+            const confirmPassword = document.getElementById('registerConfirm').value;
             const errorDiv = document.getElementById('registerError');
-
-            if (!username || !password || !confirm) {
-                showError(errorDiv, 'Please fill in all fields');
-                return;
+            if (!username || !password || !confirmPassword) return showError(errorDiv, 'Please fill in all fields');
+            if (password !== confirmPassword) return showError(errorDiv, 'Passwords do not match');
+            if (!csrfToken) return showError(errorDiv, 'Database connection unavailable. Reload to try again.');
+            authBusy = true;
+            try {
+                await apiRequest('register', { username, password });
+                document.getElementById('registerPassword').value = '';
+                document.getElementById('registerConfirm').value = '';
+                showNotification('Account created! Please login.');
+                toggleAuthForm();
+                document.getElementById('loginUsername').value = username;
+                document.getElementById('loginPassword').value = '';
+            } catch (error) {
+                showError(errorDiv, error.message || 'Registration failed.');
+            } finally {
+                authBusy = false;
             }
-
-            if (password !== confirm) {
-                showError(errorDiv, 'Passwords do not match');
-                return;
-            }
-
-            if (gameState.users[username]) {
-                showError(errorDiv, 'Username already exists');
-                return;
-            }
-
-            gameState.users[username] = { password, characters: {} };
-            localStorage.setItem('users', JSON.stringify(gameState.users));
-            showNotification('Account created! Please login.');
-            toggleAuthForm();
-            document.getElementById('loginUsername').value = '';
-            document.getElementById('loginPassword').value = '';
         }
 
         function showCharacterSelection() {
@@ -1898,9 +1960,9 @@ html { scroll-behavior: smooth; }
         }
 
         function saveCharacters() {
-            gameState.users[gameState.currentUser] = gameState.users[gameState.currentUser] || { characters: {} };
-            gameState.users[gameState.currentUser].characters = gameState.characters;
-            localStorage.setItem('users', JSON.stringify(gameState.users));
+            if (!gameState.currentUser) return;
+            pendingSave = JSON.stringify(gameState.characters);
+            flushSaves();
         }
 
         function deleteSavedCharacter(charName) {
@@ -2268,9 +2330,7 @@ html { scroll-behavior: smooth; }
             }
             char.meritPurchases.push({ name: itemName, cost: cost });
 
-            // Save to localStorage
-            gameState.users[gameState.currentUser].characters = gameState.characters;
-            localStorage.setItem('users', JSON.stringify(gameState.users));
+            saveCharacters();
 
             loadCharacterUI();
             showNotification(`✨ ${itemName} purchased for ${cost} merits!`);
@@ -3338,13 +3398,26 @@ html { scroll-behavior: smooth; }
             combatTurnPending = false;
             activeDungeon = null;
             gameState.currentCharacter = null;
-            gameState.users[gameState.currentUser].characters = gameState.characters;
-            localStorage.setItem('users', JSON.stringify(gameState.users));
+            saveCharacters();
             document.getElementById('gameContainer').classList.add('hidden');
             showCharacterSelection();
         }
 
-        function logout() {
+        async function logout() {
+            if (authBusy) return;
+            authBusy = true;
+            try {
+                if (!(await flushSaves())) {
+                    showNotification('Cannot log out while progress is unsaved.');
+                    return;
+                }
+                await apiRequest('logout');
+            } catch (error) {
+                showNotification('Logout failed. Please try again.');
+                return;
+            } finally {
+                authBusy = false;
+            }
             gameState.currentUser = null;
             gameState.currentCharacter = null;
             gameState.characters = {};
