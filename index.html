@@ -980,43 +980,44 @@ html { scroll-behavior: smooth; }
     <!-- Auth Container -->
     <div id="authContainer" class="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 modal-overlay">
         <div class="auth-form">
-            <h2>⚔️ HAVEN v1</h2>
-            <div id="loginForm">
-                <div class="form-group">
-                    <label>Username</label>
-                    <input type="text" id="loginUsername" placeholder="Enter username" autocomplete="username" />
-                </div>
-                <div class="form-group">
-                    <label>Password</label>
-                    <input type="password" id="loginPassword" placeholder="Enter password" autocomplete="current-password" />
-                </div>
-                <div id="loginError" class="error-message hidden"></div>
-                <button class="btn-primary w-full mb-4" id="loginBtn">Login</button>
-                <p class="text-center text-gray-400">
-                    Don't have account?
-                    <span class="text-yellow-500 cursor-pointer hover:text-yellow-300 transition font-bold" onclick="toggleAuthForm()">Register</span>
-                </p>
-            </div>
-            <div id="registerForm" class="hidden">
-                <div class="form-group">
-                    <label>Username</label>
-                    <input type="text" id="registerUsername" placeholder="Choose username" autocomplete="username" />
-                </div>
-                <div class="form-group">
-                    <label>Password</label>
-                    <input type="password" id="registerPassword" placeholder="Choose password" autocomplete="new-password" />
-                </div>
-                <div class="form-group">
-                    <label>Confirm Password</label>
-                    <input type="password" id="registerConfirm" placeholder="Confirm password" autocomplete="new-password" />
-                </div>
-                <div id="registerError" class="error-message hidden"></div>
-                <button class="btn-primary w-full mb-4" id="registerBtn">Register</button>
-                <p class="text-center text-gray-400">
-                    Have account?
-                    <span class="text-yellow-500 cursor-pointer hover:text-yellow-300 transition font-bold" onclick="toggleAuthForm()">Login</span>
-                </p>
-            </div>
+                        <h2>⚔️ HAVEN v1</h2>
+             <p class="text-center text-gray-400 mb-4">Sign in to access your heroes and saved adventures.</p>
+             <form id="loginForm" autocomplete="on">
+                 <div class="form-group">
+                     <label for="loginUsername">Username</label>
+                     <input type="text" id="loginUsername" placeholder="Enter username" autocomplete="username" maxlength="32" pattern="[A-Za-z0-9_]{1,32}" required />
+                 </div>
+                 <div class="form-group">
+                     <label for="loginPassword">Password</label>
+                     <input type="password" id="loginPassword" placeholder="Enter password" autocomplete="current-password" minlength="8" required />
+                 </div>
+                 <div id="loginError" class="error-message hidden" role="alert"></div>
+                 <button class="btn-primary w-full mb-4" id="loginBtn" type="submit">Login</button>
+                 <p class="text-center text-gray-400">
+                     Don't have an account?
+                     <span class="text-yellow-500 cursor-pointer hover:text-yellow-300 transition font-bold" onclick="toggleAuthForm()">Register</span>
+                 </p>
+             </form>
+             <form id="registerForm" class="hidden" autocomplete="on">
+                 <div class="form-group">
+                     <label for="registerUsername">Username</label>
+                     <input type="text" id="registerUsername" placeholder="Choose username" autocomplete="username" maxlength="32" pattern="[A-Za-z0-9_]{1,32}" required />
+                 </div>
+                 <div class="form-group">
+                     <label for="registerPassword">Password</label>
+                     <input type="password" id="registerPassword" placeholder="Choose password (at least 8 characters)" autocomplete="new-password" minlength="8" required />
+                 </div>
+                 <div class="form-group">
+                     <label for="registerConfirm">Confirm Password</label>
+                     <input type="password" id="registerConfirm" placeholder="Confirm password" autocomplete="new-password" minlength="8" required />
+                 </div>
+                 <div id="registerError" class="error-message hidden" role="alert"></div>
+                 <button class="btn-primary w-full mb-4" id="registerBtn" type="submit">Register</button>
+                 <p class="text-center text-gray-400">
+                     Already have an account?
+                     <span class="text-yellow-500 cursor-pointer hover:text-yellow-300 transition font-bold" onclick="toggleAuthForm()">Login</span>
+                 </p>
+             </form>
         </div>
     </div>
 
@@ -1024,8 +1025,8 @@ html { scroll-behavior: smooth; }
     <div id="charSelectContainer" class="modal-overlay hidden">
         <section class="auth-form character-menu" aria-labelledby="characterMenuTitle">
             <header class="character-menu-header">
-                <h2 id="characterMenuTitle">⚔️ Your Heroes</h2>
-                <p>Select a saved character or create a new hero to begin.</p>
+                                 <h2 id="characterMenuTitle">⚔️ Your Heroes</h2>
+                 <p id="characterAccountName">Select a saved character or create a new hero to begin.</p>
             </header>
             <div class="flex justify-between items-center mb-3">
                 <h3 class="text-gray-300 font-bold">Saved Characters</h3>
@@ -1063,7 +1064,7 @@ html { scroll-behavior: smooth; }
                     <button class="btn-danger" id="cancelCreateCharBtn" type="button">Cancel</button>
                 </div>
             </form>
-            <button class="btn-danger w-full mt-3" id="logoutBtn" type="button">Back to Start</button>
+                         <button class="btn-danger w-full mt-3" id="logoutBtn" type="button">Log Out</button>
         </section>
     </div>
 
@@ -1769,8 +1770,8 @@ html { scroll-behavior: smooth; }
         });
 
         function setupEventListeners() {
-            document.getElementById('loginBtn').addEventListener('click', login);
-            document.getElementById('registerBtn').addEventListener('click', register);
+                         document.getElementById('loginForm').addEventListener('submit', login);
+             document.getElementById('registerForm').addEventListener('submit', register);
             document.getElementById('logoutBtn').addEventListener('click', logout);
             document.getElementById('logoutGameBtn').addEventListener('click', logout);
             document.getElementById('logoutAccBtn').addEventListener('click', logout);
@@ -1795,7 +1796,8 @@ html { scroll-behavior: smooth; }
             document.getElementById('registerError').classList.add('hidden');
         }
 
-        async function login() {
+        async function login(event) {
+            event.preventDefault();
             if (authBusy) return;
             const username = document.getElementById('loginUsername').value;
             const password = document.getElementById('loginPassword').value;
@@ -1814,7 +1816,8 @@ html { scroll-behavior: smooth; }
             }
         }
 
-        async function register() {
+        async function register(event) {
+            event.preventDefault();
             if (authBusy) return;
             const username = document.getElementById('registerUsername').value;
             const password = document.getElementById('registerPassword').value;
@@ -1840,6 +1843,7 @@ html { scroll-behavior: smooth; }
         }
 
         function showCharacterSelection() {
+            document.getElementById('characterAccountName').textContent = `Signed in as ${gameState.currentUser}`;
             document.getElementById('authContainer').classList.add('hidden');
             document.getElementById('charSelectContainer').classList.remove('hidden');
             refreshCharacterList();
